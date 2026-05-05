@@ -287,6 +287,34 @@ index 63105b29fbf5..f38e2601531c 100644
  	return raw_pci_write(pci_domain_nr(bus), bus->number,
  				  devfn, where, size, value);
  }
+diff --git a/arch/x86/pci/irq.c b/arch/x86/pci/irq.c
+index 0de436316a1d..dde625251c99 100644
+--- a/arch/x86/pci/irq.c
++++ b/arch/x86/pci/irq.c
+@@ -1720,6 +1720,11 @@ static int pirq_enable_irq(struct pci_dev *dev)
+ {
+ 	u8 pin = 0;
+ 
++#ifdef CONFIG_X86_PS5
++	/* Legacy IRQ is not available. */
++	return 0;
++#endif
++
+ 	pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
+ 	if (pin && !pcibios_lookup_irq(dev, 1)) {
+ 		char *msg = "";
+@@ -1801,6 +1806,11 @@ bool mp_should_keep_irq(struct device *dev)
+ 
+ static void pirq_disable_irq(struct pci_dev *dev)
+ {
++#ifdef CONFIG_X86_PS5
++	/* Legacy IRQ is not available. */
++	return;
++#endif
++
+ 	if (io_apic_assign_pci_irqs && !mp_should_keep_irq(&dev->dev) &&
+ 	    dev->irq_managed && dev->irq) {
+ 		mp_unmap_irq(dev->irq);
 diff --git a/arch/x86/platform/Makefile b/arch/x86/platform/Makefile
 index 3ed03a2552d0..40ffa1a2156a 100644
 --- a/arch/x86/platform/Makefile
