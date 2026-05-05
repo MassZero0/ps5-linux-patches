@@ -440,30 +440,32 @@ index 53fbd2e0acdd..d36c1909e0e6 100644
  obj-$(CONFIG_S390)		+= s390/
 +
 +obj-$(CONFIG_X86_PS5)		+= ps5/
-diff --git a/drivers/firmware/dmi_scan.c b/drivers/firmware/dmi_scan.c
-index 70d39adf50dc..bb6eefe67cfb 100644
---- a/drivers/firmware/dmi_scan.c
-+++ b/drivers/firmware/dmi_scan.c
-@@ -675,6 +675,18 @@ static void __init dmi_scan_machine(void)
- 	char __iomem *p, *q;
- 	char buf[32];
+diff --git a/drivers/firmware/dmi-id.c b/drivers/firmware/dmi-id.c
+index 477a37e2ef80..e1af70946c89 100644
+--- a/drivers/firmware/dmi-id.c
++++ b/drivers/firmware/dmi-id.c
+@@ -228,8 +228,16 @@ static int __init dmi_id_init(void)
+ {
+ 	int ret;
  
 +#ifdef CONFIG_X86_PS5
-+	if (!dmi_available) {
-+		dmi_ident[DMI_SYS_VENDOR] = "Sony Interactive Entertainment";
-+		dmi_ident[DMI_PRODUCT_NAME] = "PlayStation 5";
-+		/* Filled by spcie.c */
-+		dmi_ident[DMI_PRODUCT_VERSION] = "Unknown";
-+		dmi_ident[DMI_PRODUCT_SERIAL] = "Unknown";
-+		dmi_available = 1;
-+		return;
-+	}
++	dmi_set_system_info(DMI_SYS_VENDOR, "Sony Interactive Entertainment");
++	dmi_set_system_info(DMI_PRODUCT_NAME, "PlayStation 5");
++	/* Filled by spcie.c */
++	dmi_set_system_info(DMI_PRODUCT_VERSION, "Unknown");
++	dmi_set_system_info(DMI_PRODUCT_SERIAL, "Unknown");
++#else
+ 	if (!dmi_available)
+ 		return -ENODEV;
 +#endif
-+
- 	if (efi_enabled(EFI_CONFIG_TABLES)) {
- 		/*
- 		 * According to the DMTF SMBIOS reference spec v3.0.0, it is
-@@ -953,6 +965,14 @@ const char *dmi_get_system_info(int field)
+ 
+ 	dmi_id_init_attr_table();
+ 
+diff --git a/drivers/firmware/dmi_scan.c b/drivers/firmware/dmi_scan.c
+index 70d39adf50dc..5d283649817e 100644
+--- a/drivers/firmware/dmi_scan.c
++++ b/drivers/firmware/dmi_scan.c
+@@ -953,6 +953,14 @@ const char *dmi_get_system_info(int field)
  }
  EXPORT_SYMBOL(dmi_get_system_info);
  
