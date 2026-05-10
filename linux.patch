@@ -1,5 +1,5 @@
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
-index e2df1b147184..34b25905fca4 100644
+index fe106da41ae5..6fd78cbfe1d6 100644
 --- a/arch/x86/Kconfig
 +++ b/arch/x86/Kconfig
 @@ -605,6 +605,14 @@ config X86_NUMACHIP
@@ -139,7 +139,7 @@ index cb9852ad6098..83bb0cf9e40b 100644
  		return true;
  
 diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
-index 56347520858e..09ead48da003 100644
+index ccc7b2e34a11..7d941c4d30f6 100644
 --- a/arch/x86/kvm/x86.c
 +++ b/arch/x86/kvm/x86.c
 @@ -112,7 +112,11 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_host);
