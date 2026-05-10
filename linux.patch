@@ -2758,10 +2758,10 @@ index 000000000000..73bb7ca5d1d9
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/ps5/spcie.c b/drivers/ps5/spcie.c
 new file mode 100644
-index 000000000000..eca41996f4a1
+index 000000000000..ecec0d6623b1
 --- /dev/null
 +++ b/drivers/ps5/spcie.c
-@@ -0,0 +1,678 @@
+@@ -0,0 +1,879 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
@@ -2770,6 +2770,7 @@ index 000000000000..eca41996f4a1
 +#include <linux/pci.h>
 +#include <linux/ps5.h>
 +#include <linux/dmi.h>
++#include <linux/delay.h>
 +
 +#define PCI_DEVICE_ID_SPCIE	0x9107
 +#define SPCIE_SUBFUNC_ICC	12
@@ -2821,12 +2822,15 @@ index 000000000000..eca41996f4a1
 +
 +struct spcie_dev {
 +	struct pci_dev *pdev;
-+	void __iomem *bar2;
-+	void __iomem *bar4;
 +	struct spcie_icc_dev *icc_dev;
++	void __iomem *bar2;
++	void __iomem *pervasive0;
 +};
 +
++static struct spcie_dev *sdev;
 +static struct spcie_icc_dev *icc_dev;
++
++static u32 spcie_chip_revision_id = 0;
 +
 +static u8 indicator_white_dim[] = {
 +	0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x11,
@@ -3318,7 +3322,7 @@ index 000000000000..eca41996f4a1
 +	init_waitqueue_head(&icc_dev->wq);
 +
 +	icc_dev->icc_doorbell_base = sdev->bar2 + ICC_DOORBELL_OFFSET;
-+	icc_dev->icc_base = sdev->bar4;
++	icc_dev->icc_base = sdev->pervasive0;
 +
 +	ret = spcie_power_button_init(icc_dev);
 +	if (ret)
@@ -3374,9 +3378,169 @@ index 000000000000..eca41996f4a1
 +	return 0;
 +}
 +
++u32 spcie_get_chip_id(void)
++{
++	return spcie_chip_revision_id & 0xff0000;
++}
++EXPORT_SYMBOL(spcie_get_chip_id);
++
++u32 spcie_get_revision_id(void)
++{
++	return spcie_chip_revision_id & 0xffff;
++}
++EXPORT_SYMBOL(spcie_get_revision_id);
++
++u32 spcie_bar2_180000_read(u32 reg)
++{
++	return readl(sdev->bar2 + 0x180000 + reg);
++}
++EXPORT_SYMBOL(spcie_bar2_180000_read);
++
++void spcie_bar2_180000_write(u32 reg, u32 val)
++{
++	writel(val, sdev->bar2 + 0x180000 + reg);
++}
++EXPORT_SYMBOL(spcie_bar2_180000_write);
++
++u32 spcie_pervasive0_4000_read(u32 reg)
++{
++	return readl(sdev->pervasive0 + 0x4000 + reg);
++}
++EXPORT_SYMBOL(spcie_pervasive0_4000_read);
++
++static int spcie_init_dev(struct spcie_dev *sdev, int dev_ip)
++{
++	void __iomem *bar;
++	u32 offset0, offset1, offset2;
++	u32 val;
++	int retries = 10000;
++
++	switch (dev_ip) {
++	case 0:
++		bar = sdev->bar2;
++		offset0 = 0x142020;
++		offset1 = 0x142028;
++		offset2 = 0x180020;
++		break;
++	case 1:
++		bar = sdev->bar2;
++		offset0 = 0x143820;
++		offset1 = 0x143828;
++		offset2 = 0x18002c;
++		break;
++	case 2:
++		bar = sdev->bar2;
++		offset0 = 0x144820;
++		offset1 = 0x144828;
++		offset2 = 0x180030;
++		break;
++	case 3:
++		bar = sdev->bar2;
++		offset0 = 0x144020;
++		offset1 = 0x144028;
++		offset2 = 0x180024;
++		break;
++	case 4:
++		bar = sdev->pervasive0;
++		offset0 = 0x42420;
++		offset1 = 0x42428;
++		offset2 = 0x7010;
++		break;
++	}
++
++	writel(readl(bar + offset0) | 0x10, bar + offset0);
++
++	while (1) {
++		val = readl(bar + offset1);
++		if ((val & 0x10) == 0 && (val & 0x20) == 0 && (val & 0x40) == 0 && (val & 0x80) == 0)
++			break;
++		udelay(10);
++		if (!--retries) {
++			printk("[ERROR]: cannot stop the transaction(%X): %X\n", offset0, val);
++			break;
++		}
++	}
++
++	writel(readl(bar + offset0) | 0x1, bar + offset0);
++
++	if (dev_ip == 4) {
++		writel(1, sdev->pervasive0 + offset2);
++		writel(3, sdev->pervasive0 + 0x74b4);
++	} else {
++		writel(3, sdev->bar2 + offset2);
++
++		switch (dev_ip) {
++		case 0:
++			writel(1, sdev->pervasive0 + 0x74c8);
++			writel(0x1f, sdev->pervasive0 + 0x7c28);
++			break;
++		case 1:
++			writel(3, sdev->pervasive0 + 0x74c4);
++			writel(7, sdev->pervasive0 + 0x7c14);
++			break;
++		case 2:
++			writel(3, sdev->pervasive0 + 0x7498);
++			writel(7, sdev->pervasive0 + 0x7c18);
++			break;
++		case 3:
++			if (spcie_get_chip_id() == 0x110000) {
++				writel(7, sdev->pervasive0 + 0x74cc);
++			} else {
++				writel(1, sdev->pervasive0 + 0x74cc);
++			}
++			writel(0xf, sdev->pervasive0 + 0x7c1c);
++			break;
++		}
++	}
++
++	writel(readl(bar + offset0) & ~0x11, bar + offset0);
++
++	if (dev_ip == 4) {
++		writel(0, sdev->pervasive0 + offset2);
++	} else if (dev_ip == 0) {
++		writel(0, sdev->bar2 + offset2);
++
++		writel(readl(sdev->pervasive0 + 0x7c28) & ~8, sdev->pervasive0 + 0x7c28);
++		writel(readl(sdev->pervasive0 + 0x7c28) & ~1, sdev->pervasive0 + 0x7c28);
++
++		writel(1, sdev->bar2 + offset2);
++		writel(0, sdev->bar2 + offset2);
++
++		writel(readl(sdev->pervasive0 + 0x7c28) | 8, sdev->pervasive0 + 0x7c28);
++		writel(readl(sdev->pervasive0 + 0x7c28) | 1, sdev->pervasive0 + 0x7c28);
++
++		udelay(680);
++	}
++
++	return 0;
++}
++
++static int spcie_init(struct spcie_dev *sdev)
++{
++	writel(1, sdev->pervasive0 + 0x22004);
++	while ((readl(sdev->pervasive0 + 0x22000) & 7) != 4);
++
++	spcie_init_dev(sdev, 0);
++	if (spcie_get_chip_id() == 0x110000)
++		spcie_init_dev(sdev, 1);
++	spcie_init_dev(sdev, 2);
++	spcie_init_dev(sdev, 3);
++	spcie_init_dev(sdev, 4);
++
++	writel(1, sdev->bar2 + 0x18004c);
++	writel(1, sdev->pervasive0 + 0x7c08);
++
++	writel(0, sdev->bar2 + 0x18004c);
++	writel(0, sdev->pervasive0 + 0x22004);
++	while ((readl(sdev->pervasive0 + 0x22000) & 4) != 0);
++
++	return 0;
++}
++
 +static int spcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 +{
-+	struct spcie_dev *sdev;
++	u32 chip_revision, chip_id0, chip_id1;
++	char *chip_name, *rev_name;
 +	int ret;
 +
 +	ret = pcim_enable_device(pdev);
@@ -3393,11 +3557,48 @@ index 000000000000..eca41996f4a1
 +	if (!sdev->bar2)
 +		return -ENOMEM;
 +
-+	sdev->bar4 = pcim_iomap(pdev, 4, 0);
-+	if (!sdev->bar4)
++	sdev->pervasive0 = pcim_iomap(pdev, 4, 0);
++	if (!sdev->pervasive0)
 +		return -ENOMEM;
 +
 +	pci_set_master(pdev);
++
++	chip_revision = readl(sdev->pervasive0 + 0x4000);
++	dev_info(&sdev->pdev->dev, "Chip revision: %08x\n", chip_revision);
++
++	chip_id0 = readl(sdev->pervasive0 + 0x4008);
++	dev_info(&sdev->pdev->dev, "Chip ID0: %08x\n", chip_id0);
++
++	chip_id1 = readl(sdev->pervasive0 + 0x4004);
++	dev_info(&sdev->pdev->dev, "Chip ID1: %08x\n", chip_id1);
++
++	if ((chip_revision & 0xff000000) == 0x11000000) {
++		chip_name = "Salina";
++		spcie_chip_revision_id = 0x110000;
++	} else if ((chip_revision & 0xff000000) == 0x12000000) {
++		chip_name = "Salina2";
++		spcie_chip_revision_id = 0x120000;
++	} else {
++		panic("unknown subsys %08x\n", chip_revision);
++	}
++
++	switch (chip_revision & 0xffff) {
++	case 0x100: rev_name = "A0"; break;
++	case 0x101: rev_name = "A1"; break;
++	case 0x200: rev_name = "B0"; break;
++	case 0x201: rev_name = "B1"; break;
++	case 0x300: rev_name = "C0"; break;
++	default:
++		panic("unknown subsys %08x\n", chip_revision);
++	}
++
++	spcie_chip_revision_id |= (chip_revision & 0xffff);
++
++	dev_info(&sdev->pdev->dev, "%s %s\n", chip_name, rev_name);
++
++	ret = spcie_init(sdev);
++	if (ret)
++		return ret;
 +
 +	ret = pci_alloc_irq_vectors(pdev, NUM_IRQS, NUM_IRQS, PCI_IRQ_MSI);
 +	if (ret < 0)
@@ -3756,10 +3957,10 @@ index 927f8a8b7a1d..474f1207e2f3 100644
  extern void dmi_setup(void);
 diff --git a/include/linux/ps5.h b/include/linux/ps5.h
 new file mode 100644
-index 000000000000..cbbab4044922
+index 000000000000..35ef3d05525b
 --- /dev/null
 +++ b/include/linux/ps5.h
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,86 @@
 +#ifndef _LINUX_PS5_H
 +#define _LINUX_PS5_H
 +
@@ -3801,6 +4002,12 @@ index 000000000000..cbbab4044922
 +	ICC_SERVICE_ID_SC_CONFIG	= 0x8e,
 +	ICC_SERVICE_ID_FLOYD		= 0x9a,
 +};
++
++u32 spcie_get_chip_id(void);
++u32 spcie_get_revision_id(void);
++u32 spcie_bar2_180000_read(u32 reg);
++void spcie_bar2_180000_write(u32 reg, u32 val);
++u32 spcie_pervasive0_4000_read(u32 reg);
 +
 +int icc_query(u8 *query, u8 *reply);
 +
