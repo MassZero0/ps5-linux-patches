@@ -2880,10 +2880,10 @@ index 000000000000..4af890c842a7
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/ps5/spcie.c b/drivers/ps5/spcie.c
 new file mode 100644
-index 000000000000..ecec0d6623b1
+index 000000000000..d13dc14c0a14
 --- /dev/null
 +++ b/drivers/ps5/spcie.c
-@@ -0,0 +1,879 @@
+@@ -0,0 +1,898 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
@@ -3500,6 +3500,16 @@ index 000000000000..ecec0d6623b1
 +	return 0;
 +}
 +
++static int spcie_icc_shutdown(struct spcie_dev *sdev)
++{
++	icc_fan_change_servo_pattern(0);
++
++	/* Disable IRQs */
++	writel(0, icc_dev->icc_doorbell_base + ICC_REG_INTR_MASK);
++
++	return 0;
++}
++
 +u32 spcie_get_chip_id(void)
 +{
 +	return spcie_chip_revision_id & 0xff0000;
@@ -3745,6 +3755,14 @@ index 000000000000..ecec0d6623b1
 +	}
 +}
 +
++static void spcie_shutdown(struct pci_dev *pdev)
++{
++	struct spcie_dev *sdev = pci_get_drvdata(pdev);
++	if (sdev) {
++		spcie_icc_shutdown(sdev);
++	}
++}
++
 +static const struct pci_device_id spcie_ids[] = {
 +	{ PCI_DEVICE(PCI_VENDOR_ID_SONY, PCI_DEVICE_ID_SPCIE) },
 +	{ 0, }
@@ -3756,6 +3774,7 @@ index 000000000000..ecec0d6623b1
 +	.id_table	= spcie_ids,
 +	.probe		= spcie_probe,
 +	.remove		= spcie_remove,
++	.shutdown	= spcie_shutdown,
 +};
 +
 +module_pci_driver(spcie_driver);
@@ -3765,10 +3784,10 @@ index 000000000000..ecec0d6623b1
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/ps5/tpcie.c b/drivers/ps5/tpcie.c
 new file mode 100644
-index 000000000000..cfe53c9861c1
+index 000000000000..23de43ea4b00
 --- /dev/null
 +++ b/drivers/ps5/tpcie.c
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,303 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/console.h>
@@ -3983,12 +4002,6 @@ index 000000000000..cfe53c9861c1
 +
 +static void tpcie_uart_remove(struct tpcie_dev *tdev)
 +{
-+	if (!uart_dev)
-+		return;
-+
-+	/* Disable IRQs */
-+	writel(0, uart_dev->uart_base + 0x8);
-+
 +	unregister_console(&tpcie_uart_console);
 +
 +	if (uart_dev->tty_drv) {
@@ -3997,6 +4010,12 @@ index 000000000000..cfe53c9861c1
 +	}
 +
 +	tty_port_destroy(&uart_dev->tty_port);
++}
++
++static void tpcie_uart_shutdown(struct tpcie_dev *tdev)
++{
++	/* Disable IRQs */
++	writel(0, uart_dev->uart_base + 0x8);
 +}
 +
 +static int tpcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -4045,6 +4064,14 @@ index 000000000000..cfe53c9861c1
 +	}
 +}
 +
++static void tpcie_shutdown(struct pci_dev *pdev)
++{
++	struct tpcie_dev *tdev = pci_get_drvdata(pdev);
++	if (tdev) {
++		tpcie_uart_shutdown(tdev);
++	}
++}
++
 +static const struct pci_device_id tpcie_ids[] = {
 +	{ PCI_DEVICE(PCI_VENDOR_ID_SONY, PCI_DEVICE_ID_TPCIE) },
 +	{ 0, }
@@ -4056,6 +4083,7 @@ index 000000000000..cfe53c9861c1
 +	.id_table	= tpcie_ids,
 +	.probe		= tpcie_probe,
 +	.remove		= tpcie_remove,
++	.shutdown	= tpcie_shutdown,
 +};
 +
 +module_pci_driver(tpcie_driver);
